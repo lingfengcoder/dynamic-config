@@ -1,5 +1,5 @@
 ## 基于springboot2.0的自定义动态配置注解
-加上注解后，配置中心的配置变更会自动更新到bean中，无需重启服务。
+加上注解后，配置中心的配置变更会自动更新到bean中，无需重启服务。支持复杂对象的配置
 可适配任何配置中心，只需实现适配器即可，目前已适配nacos配置中心
 
 ## 展示
@@ -7,7 +7,7 @@
 
 ### demo
 #### 基础用法
-引如坐标
+引坐标
 ```xml
         <dependency>
             <groupId>com.lingfengx</groupId>
@@ -31,6 +31,18 @@ public class DynamicYmlDemoConfig {
         System.out.println("DynamicDemoConfig init");
     }
 }
+```
+对应配置文件
+```yml
+clazz-demo:
+  date: 2022-01-01
+  intVal: 112233
+  bool: true
+  innerConfig:
+    name: name
+    age: 20
+    birthday: 2024-01-01
+    male: true
 ```
 
 #### 进阶用法
@@ -75,7 +87,7 @@ public class BeanAutoConfiguration {
 }
 ```
 
-配置刷新的监听
+### 配置刷新的监听
 ```java
 @Component
 public class DynamicValListenerAdapter{
