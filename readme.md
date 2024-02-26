@@ -74,3 +74,16 @@ public class BeanAutoConfiguration {
     }
 }
 ```
+
+配置刷新的监听
+```java
+@Component
+public class DynamicValListenerAdapter{
+    @Async
+    @EventListener(classes = ConfigRefreshEvent.class)
+    public void onApplicationEvent(ConfigRefreshEvent event) {
+        log.info("ConfigmapRefreshEventListener {}", event);
+        //对刷新的配置进行处理
+    }
+}
+```

@@ -1,8 +1,15 @@
+# Default ignored files
+/shelf/
+/workspace.xml
+# Editor-based HTTP Client requests
+/httpRequests/
+
 target/
 !.mvn/wrapper/maven-wrapper.jar
 /bin/
 .DS_Store
 
+.idea/
 ### STS ###
 .apt_generated
 .classpath
