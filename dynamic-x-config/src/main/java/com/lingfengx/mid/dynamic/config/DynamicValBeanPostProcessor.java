@@ -3,8 +3,10 @@ package com.lingfengx.mid.dynamic.config;
 import cn.hutool.core.collection.CollectionUtil;
 import cn.hutool.extra.spring.SpringUtil;
 import com.lingfengx.mid.dynamic.config.ann.DynamicValConfig;
+import com.lingfengx.mid.dynamic.config.event.ConfigRefreshEvent;
 import com.lingfengx.mid.dynamic.config.parser.ConfigFileTypeEnum;
 import com.lingfengx.mid.dynamic.config.parser.ConfigParserHandler;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.aop.framework.AopProxyUtils;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.config.BeanPostProcessor;
@@ -12,6 +14,7 @@ import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.source.ConfigurationPropertySource;
 import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
+import org.springframework.context.*;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.core.annotation.AnnotationUtils;
 
@@ -22,8 +25,8 @@ import java.util.Map;
  * 动态配置注解处理器
  */
 
-//@Slf4j
-public class DynamicValBeanPostProcessor implements BeanPostProcessor {
+@Slf4j
+public class DynamicValBeanPostProcessor implements BeanPostProcessor, ApplicationContextAware {
 
     @Override
     public Object postProcessBeforeInitialization(Object bean, String beanName) throws BeansException {
@@ -47,7 +50,7 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor {
             Class<? extends DynamicValListenerRegister> listenerRegister = baseAnnotation.listener();
             //注册适配器
             DynamicValListenerRegister adapter = SpringUtil.getBean(listenerRegister);
-            adapter.register(file, prefix, data -> process(data, prefix, finalFileType, bean));
+            adapter.register(file, prefix, data -> process(data, file, prefix, finalFileType, bean));
         }
         return bean;
     }
@@ -64,7 +67,7 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor {
         }
         String prefix = dynamicValConfig.prefix();
         if (prefix == null || prefix.isEmpty()) {
-            throw new RuntimeException("config prefix can not be null");
+            //throw new RuntimeException("config prefix can not be null");
         }
         String fileType = dynamicValConfig.fileType();
         if (fileType == null || fileType.isEmpty()) {
@@ -81,20 +84,26 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor {
     }
 
 
-    private void process(String data, String prefix, String fileType, Object bean) {
-
-        ConfigFileTypeEnum configFileType = ConfigFileTypeEnum.of(fileType);
-        Map<Object, Object> newConfig = null;
+    private void process(String data, String file, String prefix, String fileType, Object bean) {
         try {
-            newConfig = ConfigParserHandler.getInstance().parseConfig(data, configFileType);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+            ConfigFileTypeEnum configFileType = ConfigFileTypeEnum.of(fileType);
+            Map<Object, Object> newConfig = null;
+            try {
+                newConfig = ConfigParserHandler.getInstance().parseConfig(data, configFileType);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            if (CollectionUtil.isEmpty(newConfig)) {
+                return;
+            }
+            Object newBean = loadConfigBeanByPrefix(prefix, newConfig, bean);
+            //BeanUtils.copyProperties(bean, newBean);
+            //发布配置更新的事件
+            applicationContext.publishEvent(new ConfigRefreshEvent(file, prefix, newBean));
+        } catch (Exception e) {
+            log.error("process dynamic config error", e);
+//            throw new RuntimeException("process dynamic config error", e);
         }
-        if (CollectionUtil.isEmpty(newConfig)) {
-            return;
-        }
-        Object newBean = loadConfigBeanByPrefix(prefix, newConfig, bean);
-        //BeanUtils.copyProperties(bean, newBean);
     }
 
     /**
@@ -111,5 +120,12 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor {
         Binder binder = new Binder(sources);
         Object o = binder.bind(prefix, Bindable.ofInstance(bean)).get();
         return (T) o;
+    }
+
+    private ApplicationContext applicationContext;
+
+    @Override
+    public void setApplicationContext(ApplicationContext applicationContext) throws BeansException {
+        this.applicationContext = applicationContext;
     }
 }
