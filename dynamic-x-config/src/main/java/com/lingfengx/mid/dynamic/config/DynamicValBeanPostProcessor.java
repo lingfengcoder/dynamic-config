@@ -49,7 +49,7 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor, Applicati
             //注册监听
             Class<? extends DynamicValListenerRegister> listenerRegister = baseAnnotation.listener();
             //注册适配器
-            DynamicValListenerRegister adapter = SpringUtil.getBean(listenerRegister);
+            DynamicValListenerRegister adapter = applicationContext.getBean(listenerRegister);
             adapter.register(file, prefix, data -> process(data, file, prefix, finalFileType, bean));
         }
         return bean;
