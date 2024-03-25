@@ -1,46 +1,27 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<project xmlns="http://maven.apache.org/POM/4.0.0"
-         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/maven-v4_0_0.xsd">
     <modelVersion>4.0.0</modelVersion>
-    <parent>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-dependencies</artifactId>
-        <version>2.7.4</version>
-    </parent>
-    <artifactId>dynamic-x</artifactId>
     <groupId>com.lingfengx</groupId>
-    <version>${revision}</version>
+    <artifactId>dynamic-x-limiter</artifactId>
+    <version>1.0.0.SNAPSHOT</version>
     <packaging>pom</packaging>
+    <modules>
+        <module>dynamic-x-limiter-core</module>
+        <module>dynamic-x-limiter-starter</module>
+    </modules>
     <properties>
-        <revision>1.0.2-RELEASE</revision>
+        <limiter.version>1.0.0.SNAPSHOT</limiter.version>
         <maven.compiler.source>8</maven.compiler.source>
         <maven.compiler.target>8</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <middleware.version>1.0.8.1-RELEASE</middleware.version>
         <hutool.version>5.3.10</hutool.version>
         <configmap.version>1.1.1</configmap.version>
         <flatten-maven-plugin.version>1.1.0</flatten-maven-plugin.version>
+        <aspectj.version>1.9.7</aspectj.version>
+        <spring.version>5.0.9.RELEASE</spring.version>
+        <slf4j.version>1.7.36</slf4j.version>
+        <jedis.version>2.9.0</jedis.version>
     </properties>
-
-    <modules>
-        <module>dynamic-x-config</module>
-        <module>dynamic-x-limiter</module>
-    </modules>
-    <dependencyManagement>
-        <dependencies>
-            <dependency>
-                <groupId>com.lingfengx.mid</groupId>
-                <artifactId>dynamic-x-config</artifactId>
-                <version>${revision}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.lingfengx.mid</groupId>
-                <artifactId>dynamic-x-configmap</artifactId>
-                <version>${revision}</version>
-            </dependency>
-        </dependencies>
-    </dependencyManagement>
     <build>
         <plugins>
             <plugin>
@@ -95,15 +76,4 @@
             </plugin>
         </plugins>
     </build>
-    <distributionManagement>
-        <repository>
-            <id>private-releases</id>
-            <url>http://116.62.222.54/repository/maven-releases</url>
-        </repository>
-        <snapshotRepository>
-            <id>private-snapshots</id>
-            <url>http://116.62.222.54/repository/maven-snapshots</url>
-        </snapshotRepository>
-    </distributionManagement>
-
 </project>
