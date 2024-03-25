@@ -3,14 +3,14 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>com.lingfengx</groupId>
     <artifactId>dynamic-x-limiter</artifactId>
-    <version>1.0.0.SNAPSHOT</version>
+    <version>${revision}</version>
     <packaging>pom</packaging>
     <modules>
         <module>dynamic-x-limiter-core</module>
         <module>dynamic-x-limiter-starter</module>
     </modules>
     <properties>
-        <limiter.version>1.0.0.SNAPSHOT</limiter.version>
+        <revision>1.0.0-SNAPSHOT</revision>
         <maven.compiler.source>8</maven.compiler.source>
         <maven.compiler.target>8</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -76,4 +76,14 @@
             </plugin>
         </plugins>
     </build>
+    <distributionManagement>
+        <repository>
+            <id>private-releases</id>
+            <url>http://116.62.222.54/repository/maven-releases</url>
+        </repository>
+        <snapshotRepository>
+            <id>private-snapshots</id>
+            <url>http://116.62.222.54/repository/maven-snapshots</url>
+        </snapshotRepository>
+    </distributionManagement>
 </project>

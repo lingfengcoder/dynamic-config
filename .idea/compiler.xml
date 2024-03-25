@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project version="4">
   <component name="CompilerConfiguration">
+    <excludeFromCompile>
+      <directory url="file://$PROJECT_DIR$/dynamic-x-limiter/src/main/resources/archetype-resources" includeSubdirectories="true" />
+    </excludeFromCompile>
     <annotationProcessing>
       <profile name="Maven default annotation processors profile" enabled="true">
         <sourceOutputDir name="target/generated-sources/annotations" />
@@ -8,8 +11,15 @@
         <outputRelativeToContentRoot value="true" />
         <module name="dynamic-x-config" />
         <module name="dynamic-x-configmap" />
+        <module name="dynamic-x-limiter-starter" />
+        <module name="dynamic-x-limiter-core" />
       </profile>
     </annotationProcessing>
+    <bytecodeTargetLevel>
+      <module name="dynamic-x-limiter (1)" target="1.5" />
+      <module name="dynamic-x-limiter (1) (com.lingfengx)" target="1.5" />
+      <module name="dynamic-x-limiter (2)" target="1.8" />
+    </bytecodeTargetLevel>
   </component>
   <component name="JavacSettings">
     <option name="ADDITIONAL_OPTIONS_OVERRIDE">

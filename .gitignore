@@ -17,6 +17,7 @@ target/
 .project
 .settings
 .springBeans
+.flattened-pom.xml
 
 ### IntelliJ IDEA ###
 .idea

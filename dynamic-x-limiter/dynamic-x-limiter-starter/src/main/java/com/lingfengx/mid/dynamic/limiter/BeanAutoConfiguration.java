@@ -9,7 +9,7 @@ import redis.clients.jedis.Jedis;
 
 import java.util.function.Supplier;
 
-@Configuration
+//@Configuration
 public class BeanAutoConfiguration {
 
     @Bean

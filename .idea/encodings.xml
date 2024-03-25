@@ -5,6 +5,12 @@
     <file url="file://$PROJECT_DIR$/dynamic-x-config/src/main/resources" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/dynamic-x-configmap/src/main/java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/dynamic-x-configmap/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/dynamic-x-limiter/dynamic-x-limiter-core/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/dynamic-x-limiter/dynamic-x-limiter-core/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/dynamic-x-limiter/dynamic-x-limiter-starter/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/dynamic-x-limiter/dynamic-x-limiter-starter/src/main/resources" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/dynamic-x-limiter/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/dynamic-x-limiter/src/main/resources" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/src/main/java" charset="UTF-8" />
     <file url="file://$PROJECT_DIR$/src/main/resources" charset="UTF-8" />
   </component>

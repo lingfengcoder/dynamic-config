@@ -25,7 +25,7 @@
 
     <modules>
         <module>dynamic-x-config</module>
-        <module>dynamic-x-limiter</module>
+<!--        <module>dynamic-x-limiter</module>-->
     </modules>
     <dependencyManagement>
         <dependencies>
