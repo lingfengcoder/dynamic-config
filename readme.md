@@ -10,8 +10,8 @@
 引坐标
 ```xml
         <dependency>
-            <groupId>com.lingfengx</groupId>
-            <artifactId>dynamic-x-config</artifactId>
+            <groupId>io.github.lingfengcoder</groupId>
+            <artifactId>dynamic-config-core</artifactId>
             <version>${revision}</version>
         </dependency>
 ```
