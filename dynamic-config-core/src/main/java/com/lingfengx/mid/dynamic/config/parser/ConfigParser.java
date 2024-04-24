@@ -20,6 +20,7 @@ package com.lingfengx.mid.dynamic.config.parser;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 
 /**
  * Config parser.
@@ -41,7 +42,7 @@ public interface ConfigParser {
      * @return
      * @throws IOException
      */
-    Map<Object, Object> doParse(String content) throws IOException;
+    Properties doParse(String content) throws IOException;
 
     /**
      * Get config file types.

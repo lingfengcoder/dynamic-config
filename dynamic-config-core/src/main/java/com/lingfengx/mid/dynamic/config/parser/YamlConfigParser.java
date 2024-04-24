@@ -24,7 +24,7 @@ import org.springframework.util.StringUtils;
 
 import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
+import java.util.Properties;
 
 /**
  * Yaml config parser.
@@ -32,9 +32,9 @@ import java.util.Map;
 public class YamlConfigParser extends AbstractConfigParser {
 
     @Override
-    public Map<Object, Object> doParse(String content) {
+    public Properties doParse(String content) {
         if (StringUtils.isEmpty(content)) {
-            return new HashMap<>(1);
+            return new Properties();
         }
         YamlPropertiesFactoryBean yamlPropertiesFactoryBean = new YamlPropertiesFactoryBean();
         yamlPropertiesFactoryBean.setResources(new ByteArrayResource(content.getBytes()));
