@@ -1,2 +1,2 @@
-#org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
-#com.lingfengx.mid.dynamic.config.adapter.BeanAutoConfiguration
+org.springframework.boot.autoconfigure.EnableAutoConfiguration=\
+ com.lingfengx.mid.dynamic.config.SpringResolver

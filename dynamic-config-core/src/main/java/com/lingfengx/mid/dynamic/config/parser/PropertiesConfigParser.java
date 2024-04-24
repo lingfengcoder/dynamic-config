@@ -23,7 +23,6 @@ import cn.hutool.core.collection.CollectionUtil;
 import java.io.IOException;
 import java.io.StringReader;
 import java.util.List;
-import java.util.Map;
 import java.util.Properties;
 
 /**
@@ -32,7 +31,7 @@ import java.util.Properties;
 public class PropertiesConfigParser extends AbstractConfigParser {
 
     @Override
-    public Map<Object, Object> doParse(String content) throws IOException {
+    public Properties doParse(String content) throws IOException {
         Properties properties = new Properties();
         properties.load(new StringReader(content));
         return properties;

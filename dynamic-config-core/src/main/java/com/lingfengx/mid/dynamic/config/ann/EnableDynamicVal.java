@@ -10,4 +10,7 @@ import java.lang.annotation.*;
 @Target(ElementType.TYPE)
 @Import({DynamicValImportSelector.class})
 public @interface EnableDynamicVal {
+    String[] scanPath() default "";
+
+    String[] filePath() default "";
 }

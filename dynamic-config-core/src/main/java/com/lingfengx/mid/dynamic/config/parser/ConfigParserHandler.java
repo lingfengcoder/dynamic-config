@@ -36,13 +36,13 @@ public class ConfigParserHandler {
         PARSERS.add(new YamlConfigParser());
     }
 
-    public Map<Object, Object> parseConfig(String content, ConfigFileTypeEnum type) throws IOException {
+    public Properties parseConfig(String content, ConfigFileTypeEnum type) throws IOException {
         for (ConfigParser parser : PARSERS) {
             if (parser.supports(type)) {
                 return parser.doParse(content);
             }
         }
-        return Collections.emptyMap();
+        return new Properties();
     }
 
     public static ConfigParserHandler getInstance() {
