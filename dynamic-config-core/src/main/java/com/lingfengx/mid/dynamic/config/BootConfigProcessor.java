@@ -24,6 +24,7 @@ import java.io.*;
 import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
+
 @Slf4j
 @Order(Integer.MAX_VALUE)
 public class BootConfigProcessor implements EnvironmentPostProcessor {
@@ -37,10 +38,12 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
         configurableEnvironment = environment;
         Class<?> mainApplicationClass = application.getMainApplicationClass();
-        log.info("====BootConfigProcessor 加载外部配置文件开始==== {}", mainApplicationClass);
-        loadDynamicValBeanRef(mainApplicationClass);
-        tryLoadLocationConfig();
-        clearAllRef();
+        boolean enable = loadDynamicValBeanRef(mainApplicationClass);
+        if (enable) {
+            log.info("====BootConfigProcessor 加载外部配置文件开始==== {}", mainApplicationClass);
+            tryLoadLocationConfig();
+            clearAllRef();
+        }
     }
 
     public static String getVal(String key) {
@@ -56,19 +59,24 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
         return propertySources.get(name);
     }
 
-    private void loadDynamicValBeanRef(Class<?> mainClazz) {
+    private boolean loadDynamicValBeanRef(Class<?> mainClazz) {
         // 获取ClassLoader
         ClassLoader classLoader = BootConfigProcessor.class.getClassLoader();
         // 使用ClassLoader加载SpringApplication类
         Field[] declaredFields = EnableDynamicVal.class.getDeclaredFields();
         try {
             EnableDynamicVal enableDynamicVal = AnnotationUtils.findAnnotation(mainClazz, EnableDynamicVal.class);
-            packageName = mainClazz.getPackage().getName();
-            scanPath = enableDynamicVal.scanPath();
-            filePath = enableDynamicVal.filePath();
+            if (enableDynamicVal != null) {
+                packageName = mainClazz.getPackage().getName();
+                scanPath = enableDynamicVal.scanPath();
+                filePath = enableDynamicVal.filePath();
+            } else {
+                return false;
+            }
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
+        return true;
     }
 
 
