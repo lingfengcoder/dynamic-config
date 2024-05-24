@@ -2,6 +2,7 @@ package com.lingfengx.mid.dynamic.config;
 
 import cn.hutool.core.collection.CollectionUtil;
 import cn.hutool.core.collection.ConcurrentHashSet;
+import cn.hutool.core.exceptions.ExceptionUtil;
 import com.lingfengx.mid.dynamic.config.ann.DynamicValConfig;
 import com.lingfengx.mid.dynamic.config.dto.BeanRef;
 import com.lingfengx.mid.dynamic.config.event.ConfigRefreshEvent;
@@ -21,11 +22,14 @@ import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.core.annotation.AnnotationUtils;
 import org.springframework.core.env.PropertiesPropertySource;
 import org.springframework.expression.spel.support.StandardEvaluationContext;
+import org.springframework.util.StringUtils;
 
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+
+import static com.lingfengx.mid.dynamic.config.util.SpelUtil.*;
 
 /**
  * 动态配置注解处理器
@@ -74,7 +78,7 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor, Applicati
     private static void checkParam(DynamicValConfig dynamicValConfig) {
         String file = dynamicValConfig.file();
         if (file == null || file.isEmpty()) {
-            throw new RuntimeException("config file can not be null");
+            throw new RuntimeException("[dynamic-config] config file can not be null");
         }
         String prefix = dynamicValConfig.prefix();
         if (prefix == null || prefix.isEmpty()) {
@@ -85,7 +89,7 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor, Applicati
             fileType = file.toLowerCase().substring(file.lastIndexOf(".") + 1);
         }
         if (ConfigFileTypeEnum.of(fileType) == null) {
-            throw new RuntimeException("config file type is not support or null");
+            throw new RuntimeException("[dynamic-config] config file type is not support or null");
         }
     }
 
@@ -97,17 +101,21 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor, Applicati
 
     protected static void process(String data, String file, String prefix, String fileType, Object bean) {
         try {
+            if (!StringUtils.hasLength(data)) {
+                log.warn("[dynamic-config] config has null data {}", file);
+                return;
+            }
             Properties newConfig = convertProperties(data, file, fileType);
             if (CollectionUtil.isEmpty(newConfig)) {
                 return;
             }
             Object newBean = load(newConfig, file, prefix, bean);
             //发布配置更新的事件
-            if (applicationContext != null) {
+            if (applicationContext != null && newBean != null) {
                 applicationContext.publishEvent(new ConfigRefreshEvent(file, prefix, newBean));
             }
         } catch (Exception e) {
-            log.error("process dynamic config error", e);
+            log.error("[dynamic-config] dynamic config error {} ", e.getMessage(), e);
 //            throw new RuntimeException("process dynamic config error", e);
         }
     }
@@ -129,7 +137,7 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor, Applicati
         //删除已有引用记录
         removeBeanRef(bean);
         //解析并更新配置
-        parserAndUpdate(newConfig, bean, prefix);
+        parseAndUpdate(newConfig, bean, prefix);
         //更新配置到环境
         updateConfigToEnv(file, newConfig);
         //加载配置并更新bean
@@ -154,52 +162,154 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor, Applicati
      * @param bean
      * @param prefix
      */
-    protected static Properties parserAndUpdate(Properties newConfig, Object bean, String prefix) {
+    protected static Properties parseAndUpdate(Properties newConfig, Object bean, String prefix) {
         //将新的配置放入SPEL环境中
-        StandardEvaluationContext evaluationContext = SpelUtil.transEvaluationContext(newConfig);
         for (Object key : newConfig.keySet()) {
-            //如果包含占位符
             Object value = newConfig.get(key);
-            if (SpelUtil.isPlaceholder(value.toString()) || SpelUtil.isSPEL(value.toString())) {
-                String placeholder = SpelUtil.parsePlaceholder(value.toString());
-                //自我解析最新值
-                String val = SpelUtil.parse(evaluationContext, placeholder);
-                if (val == null) {
-                    //如果占位符不能从自己种获取到，则从上下文中获取
-                    val = BootConfigProcessor.getVal(value.toString());
-                }
-                //无论有没有解析出来，都要则进行记录，以便后续级联刷新
-                if (bean != null) {
-                    addBeanRef(placeholder, key, value, bean, prefix);
-                }
-                newConfig.put(key, val);
+            String valStr = value == null ? null : value.toString();
+            String parsedValue = parseFormatParam(newConfig, key == null ? null : key.toString(),
+                    valStr, bean, null);
+            if (key != null && !Objects.equals(parsedValue, valStr)) {
+                newConfig.put(key, parsedValue);
+                //刷新依赖的bean
+                refreshOtherRefBean(newConfig, key);
             }
-        }
-        for (Object key : newConfig.keySet()) {
-            //刷新依赖的bean
-            refreshOtherRefBean(newConfig, key);
         }
         return newConfig;
     }
 
 
     /**
+     * 解析参数成 实际的数据
+     * <p>
+     * 支持
+     * value: abc_${name}_${age} -> value: abc_zhangsan_29
+     * time: #{60*60} -> time: 3600
+     * mix: abc_${name}_${age}_#{60*60} -> mix: abc_zhangsan_29_3600
+     * <p>
+     * <p>
+     * <p>
+     * #{'${shaman.s.aliyun.aksk}'.split(',')[0]}
+     * '${shaman.s.aliyun.aksk}'.split(',')[0]
+     *
+     * @param newConfig
+     * @param originalVal
+     * @return
+     */
+    protected static String parseFormatParam(Properties newConfig, String key, String originalVal, Object bean, HashSet<String> visitedKeys) {
+        if (key == null || originalVal == null) {
+            return null;
+        }
+        if (visitedKeys == null) {
+            visitedKeys = new HashSet<>(10);
+        }
+        String placeholder = originalVal;
+        //将新的配置放入SPEL环境中
+        StandardEvaluationContext evaluationContext = SpelUtil.transEvaluationContext(newConfig);
+        //如果包含占位符
+        if (SpelUtil.isPlaceholder(originalVal) || SpelUtil.isComputesPlaceholder(originalVal)) {
+            while (isPlaceholder(placeholder) || isComputesPlaceholder(placeholder)) {
+                int headHolderIdx = minPlaceholderIdx(placeholder, 0);
+                int endIdx = getEndIdx(placeholder);
+                if (endIdx <= 0) {
+                    break;
+                }
+                if (visitedKeys.contains(placeholder)) {
+                    break;
+                }
+                //${abc_#{60*60}} =>abc_#{60*60} 或者 #{60*${age}} => 60*${age}
+                {
+                    String prefix = placeholder.substring(headHolderIdx, headHolderIdx + 2);
+                    String innerPlaceholder = placeholder.substring(headHolderIdx + 2, endIdx);
+                    //abc_#{60*60}中 #{ 的位置
+                    int innerIdx = minPlaceholderIdx(innerPlaceholder, 0);
+                    //如果存在内部的占位符 ${abc_#{60*60}} 或者 ${abc}
+                    if (innerIdx >= 0) {
+                        //abc_#{60*60} 或者 abc
+                        String tmp = parseFormatParam(newConfig, key, innerPlaceholder, bean, visitedKeys);
+                        if (!Objects.equals(tmp, innerPlaceholder)) {
+                            if (prefix.contains("#")) {
+                                innerPlaceholder = parseNoWrapper(evaluationContext, tmp);
+                            } else if (prefix.contains("$")) {
+                                innerPlaceholder = parseWithWrapper(evaluationContext, tmp);
+                            }
+                            placeholder = placeholder.substring(0, headHolderIdx) + innerPlaceholder + (endIdx + 1 > placeholder.length() ? "" : placeholder.substring(endIdx + 1));
+                        } else {
+                            placeholder = placeholder;
+                            visitedKeys.add(placeholder);
+                        }
+                        //todo 无论有没有解析出来，都要则进行记录，以便后续级联刷新
+                        if (bean != null) {
+                            addBeanRef(innerPlaceholder, key, newConfig.get(key), bean, null);
+                        }
+                    } else {
+                        String value = null;
+                        if (StringUtils.hasLength(innerPlaceholder)) {
+                            //自我解析最新值
+                            if (prefix.contains("#")) {
+                                value = SpelUtil.parseNoWrapper(evaluationContext, innerPlaceholder);
+                            } else {
+                                value = SpelUtil.parseWithWrapper(evaluationContext, innerPlaceholder);
+                            }
+                            if (value == null) {
+                                //如果占位符不能从自己种获取到，则从上下文中获取
+                                try {
+                                    String wrapperVal = null;
+                                    if (prefix.contains("#")) {
+                                        wrapperVal = wrapper(innerPlaceholder, "#");
+                                    } else {
+                                        wrapperVal = wrapper(innerPlaceholder, "$");
+                                    }
+                                    value = BootConfigProcessor.getVal(wrapperVal);
+                                    //如果没有解析出来
+                                    if (Objects.equals(value, wrapperVal)) {
+                                        value = innerPlaceholder;
+                                    }
+                                } catch (Exception e) {
+                                    log.error("parseFormatParam error:{} {}", e.getMessage(), ExceptionUtil.getMessage(e));
+                                }
+                            }
+                            //todo 无论有没有解析出来，都要则进行记录，以便后续级联刷新
+                            if (bean != null) {
+                                addBeanRef(innerPlaceholder, key, newConfig.get(key), bean, null);
+                            }
+                        }
+                        //没有解析出来
+                        if (innerPlaceholder.equals(value)) {
+                            visitedKeys.add(value);
+                            //防止死循环
+                            break;
+                        }
+                        innerPlaceholder = value == null ? innerPlaceholder : value;
+                        placeholder = placeholder.substring(0, headHolderIdx) + innerPlaceholder + (endIdx + 1 > placeholder.length() ? "" : placeholder.substring(endIdx + 1));
+                    }
+                }
+            }
+        }
+        return StringUtils.hasLength(placeholder) ? placeholder : originalVal;
+    }
+
+    private static String wrapper(String val, String prefix) {
+        return prefix + "{" + val + "}";
+    }
+
+    /**
      * 添加bean的引用记录
      *
      * @param placeholder
      * @param key
-     * @param val
+     * @param originalVal
      * @param bean
      * @param prefix
      */
-    private static void addBeanRef(String placeholder, Object key, Object val, Object bean, String prefix) {
+    private static void addBeanRef(String placeholder, Object key, Object originalVal, Object bean, String prefix) {
         dynamicValBeanRefMap.computeIfAbsent(placeholder, k -> new ConcurrentHashMap<>());
         ConcurrentHashMap<Object, CopyOnWriteArrayList<BeanRef>> map = dynamicValBeanRefMap.get(placeholder);
         map.computeIfAbsent(bean, k -> new CopyOnWriteArrayList<>());
         CopyOnWriteArrayList<BeanRef> beanRefs = map.get(bean);
         //将所需要的${xxx.yy}和bean关联
         beanRefs.add(new BeanRef().setPrefix(prefix).setBean(bean)
-                .setKey(key.toString()).setValue(val).setPlaceHolder(placeholder));
+                .setKey(key.toString()).setOriginalValue(originalVal).setPlaceHolder(placeholder));
         //bean对应的placeholder
         beanPlaceHolder.computeIfAbsent(bean, k -> new ConcurrentHashSet<>());
         Set<String> beanHolderSet = beanPlaceHolder.get(bean);
@@ -246,7 +356,9 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor, Applicati
                     Map<Object, Object> newKV = new HashMap<>(1);
                     //将placeholder替换为新的值
                     Object newVal = newConfig.get(key);
-                    newKV.put(targetKey, beanRef.getValue().toString().replace("${" + beanRef.getPlaceHolder() + "}", newVal == null ? null : newVal.toString()));
+                    //不能直接简单的使用替换，而需要严格的解析
+                    //todo getOriginalValue
+                    newKV.put(targetKey, beanRef.getOriginalValue().toString().replace("${" + beanRef.getPlaceHolder() + "}", newVal == null ? null : newVal.toString()));
                     try {
                         //给bean赋新的值
                         loadConfigBeanByPrefix(targetPrefix, newKV, refBean);
@@ -268,15 +380,66 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor, Applicati
      * @return
      */
     private static <T> T loadConfigBeanByPrefix(String prefix, Map<Object, Object> configInfo, Object bean) {
-        ConfigurationPropertySource sources = new MapConfigurationPropertySource(configInfo);
-        Binder binder = new Binder(sources);
-        Object o = binder.bind(prefix, Bindable.ofInstance(bean)).get();
-        return (T) o;
+        try {
+            ConfigurationPropertySource sources = new MapConfigurationPropertySource(configInfo);
+            Binder binder = new Binder(sources);
+            Object o = binder.bind(prefix, Bindable.ofInstance(bean)).get();
+            return (T) o;
+        } catch (Exception e) {
+            log.error("load config err:{}{}{}", prefix, bean.getClass(), configInfo, e);
+        }
+        return null;
     }
 
 
     @Override
     public void setApplicationContext(ApplicationContext applicationContext) throws BeansException {
         this.applicationContext = applicationContext;
+    }
+
+
+    //test
+    public static void main(String[] args) {
+        Properties properties = new Properties();
+        properties.setProperty("name", "lingfeng");
+        properties.setProperty("name_29", "lingfeng");
+        properties.setProperty("age1", "29");
+        properties.setProperty("age2", "29");
+        properties.setProperty("age", "29");
+        properties.setProperty("time", "#{60*60}");
+        properties.setProperty("name_3600", "finished");
+
+        properties.setProperty("shaman.s.aliyun.aksk", "this_is_ak,this_is_sk");
+
+        String placeholder = "#{'${shaman.s.aliyun.aksk}'.split(',')[0]}";
+//        placeholder = "abc_#{${age1}*${age2}}";
+
+        StandardEvaluationContext evaluationContext = SpelUtil.transEvaluationContext(properties);
+        String name1 = parseWithWrapper(evaluationContext, "name");
+        System.out.println(name1);
+
+        while (placeholder.indexOf(PLACEHOLDER_SUFFIX) > 0) {
+            int beginIdx = minPlaceholderIdx(placeholder, 0);
+            int endIdx = getEndIdx(placeholder);
+            placeholder = placeholder.substring(beginIdx + 2, endIdx);
+            System.out.println(placeholder);
+        }
+        String mup = parseFormatParam(properties, "", "abc_#{${age1}*${age2}}", null, null);
+        System.out.println(mup);
+
+
+        String ak = parseFormatParam(properties, "", "bbq_name_#{'${shaman.s.aliyun.aksk}'.split(',')[0]}", null, null);
+        System.out.println(ak);
+
+        String sk = parseFormatParam(properties, "", "bbq_name_#{'${shaman.s.aliyun.aksk}'.split(',')[1]}", null, null);
+        System.out.println(sk);
+
+//        String number = parseFormatParam(properties, "#{60*60}");
+//        System.out.println(number);
+        String name = parseFormatParam(properties, "", "abc_${name_${age}}_${name_${time}}_${age}", null, null);
+        System.out.println(name);
+        String mix = parseFormatParam(properties, "", "abc_${name}_${age}_#{#{60+60}*#{70*70}}", null, null);
+        System.out.println(mix);
+
     }
 }

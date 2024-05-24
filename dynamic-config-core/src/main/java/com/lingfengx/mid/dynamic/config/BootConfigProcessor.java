@@ -1,6 +1,5 @@
 package com.lingfengx.mid.dynamic.config;
 
-import cn.hutool.core.collection.ConcurrentHashSet;
 import com.lingfengx.mid.dynamic.config.ann.DynamicValConfig;
 import com.lingfengx.mid.dynamic.config.ann.EnableDynamicVal;
 import com.lingfengx.mid.dynamic.config.dto.BeanRef;
@@ -132,7 +131,7 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
                             String data = convertToString(input);
                             Properties properties = DynamicValBeanPostProcessor.convertProperties(data, file, type);
                             //解析并更新
-                            DynamicValBeanPostProcessor.parserAndUpdate(properties, null, config.prefix());
+                            DynamicValBeanPostProcessor.parseAndUpdate(properties, null, config.prefix());
                             //刷新到环境变量中去
                             BootConfigProcessor.setVal(new PropertiesPropertySource(file, properties));
                             //添加引用
@@ -165,7 +164,7 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
         //如果结果有占位符，则添加引用，等待更新
         if (SpelUtil.isPlaceholder(v.toString())) {
             String placeholder = SpelUtil.parsePlaceholder(v.toString());
-            BeanRef beanRef = new BeanRef().setKey(k.toString()).setValue(v).setPlaceHolder(placeholder).setBean(properties);
+            BeanRef beanRef = new BeanRef().setKey(k.toString()).setOriginalValue(v).setPlaceHolder(placeholder).setBean(properties);
             placeHolderRefMap.computeIfAbsent(placeholder, key -> new HashMap<>());
             Map<Properties, List<BeanRef>> map = placeHolderRefMap.get(placeholder);
             map.computeIfAbsent(properties, key -> new ArrayList<>());
@@ -185,12 +184,28 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
         //能找到有引用的配置，且占位符已经被解析了
         if (map != null && !SpelUtil.isPlaceholder(v.toString())) {
             map.values().parallelStream().forEach(beanRefs -> {
+                //这里不应该是解析数据，而是通知bean，bean的对应的引用属性有变化，需要单独重新加载这个属性值
+                //进而可以刷新
                 for (BeanRef beanRef : beanRefs) {
                     Properties p = (Properties) beanRef.getBean();
-                    p.setProperty(beanRef.getKey(), beanRef.getValue().toString().replace("${" + beanRef.getPlaceHolder() + "}", v.toString()));
+                    //todo getOriginalValue
+                    p.setProperty(beanRef.getKey(), beanRef.getOriginalValue().toString().replace("${" + beanRef.getPlaceHolder() + "}", v.toString()));
                 }
             });
         }
+    }
+
+    /**
+     * ${}配置环形检测
+     * 例如：
+     * A:${B}
+     * B:${A}
+     * 此时刷新配置会造成死循环
+     *
+     * @return
+     */
+    private boolean recycleCheck() {
+        return false;
     }
 
     /**
