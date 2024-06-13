@@ -16,7 +16,7 @@
     <url>https://github.com/lingfengcoder/dynamic-config</url>
     <description>基于springboot2.0的自定义动态配置注解</description>
     <properties>
-        <revision>1.0.3.2</revision>
+        <revision>1.0.3.3</revision>
         <maven.compiler.source>8</maven.compiler.source>
         <maven.compiler.target>8</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>

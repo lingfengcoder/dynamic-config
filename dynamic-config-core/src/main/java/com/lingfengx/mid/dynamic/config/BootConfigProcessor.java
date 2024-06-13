@@ -126,11 +126,23 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
                 //classpath自己
                 filePathList.add("");
                 for (String path : filePathList) {
-                    if (new ClassPathResource(path + "/" + file).exists()) {
-                        try (InputStream input = new ClassPathResource(path + "/" + file).getInputStream()) {
+                    InputStream inputStream = null;
+                    if (path.startsWith(File.separator)) {
+                        File localFile = new File(path + "/" + file);
+                        if (localFile.exists() && localFile.isFile()) {
+                            inputStream = new FileInputStream(path + "/" + file);
+                        }
+                    } else {
+                        if (new ClassPathResource(path + "/" + file).exists()) {
+                            inputStream = new ClassPathResource(path + "/" + file).getInputStream();
+                        }
+                    }
+                    if (inputStream != null) {
+                        try (InputStream input = inputStream) {
                             String data = convertToString(input);
                             Properties properties = DynamicValBeanPostProcessor.convertProperties(data, file, type);
                             //解析并更新
+                            //org.springframework.util.PropertyPlaceholderHelper.parseStringValue
                             DynamicValBeanPostProcessor.parseAndUpdate(properties, null, config.prefix());
                             //刷新到环境变量中去
                             BootConfigProcessor.setVal(new PropertiesPropertySource(file, properties));
@@ -141,14 +153,14 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
                             });
                             break;
                         } catch (Exception e) {
-                            log.error(e.getMessage(), e);
+                            log.error("bootConfigProcessor-err:{}", e.getMessage(), e);
                         }
                     }
                 }
             }
             log.info("====BootConfigProcessor 加载外部配置文件完毕====");
         } catch (Exception e) {
-            log.error(e.getMessage(), e);
+            log.error("bootConfigProcessor-err:{}", e.getMessage(), e);
         }
     }
 
