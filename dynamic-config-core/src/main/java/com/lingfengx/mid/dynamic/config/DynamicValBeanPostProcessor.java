@@ -20,6 +20,7 @@ import org.springframework.boot.context.properties.source.MapConfigurationProper
 import org.springframework.context.*;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.core.annotation.AnnotationUtils;
+import org.springframework.core.annotation.Order;
 import org.springframework.core.env.PropertiesPropertySource;
 import org.springframework.expression.spel.support.StandardEvaluationContext;
 import org.springframework.util.StringUtils;
@@ -36,6 +37,7 @@ import static com.lingfengx.mid.dynamic.config.util.SpelUtil.*;
  */
 
 @Slf4j
+@Order(Integer.MAX_VALUE)
 public class DynamicValBeanPostProcessor implements BeanPostProcessor, ApplicationContextAware {
     private static ApplicationContext applicationContext;
     //<${placeholder},<bean,[key1,key2]>>

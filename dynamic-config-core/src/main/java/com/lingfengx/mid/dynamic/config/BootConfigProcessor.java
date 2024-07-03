@@ -1,5 +1,6 @@
 package com.lingfengx.mid.dynamic.config;
 
+import cn.hutool.core.util.ArrayUtil;
 import com.lingfengx.mid.dynamic.config.ann.DynamicValConfig;
 import com.lingfengx.mid.dynamic.config.ann.EnableDynamicVal;
 import com.lingfengx.mid.dynamic.config.dto.BeanRef;
@@ -18,6 +19,7 @@ import org.springframework.core.env.PropertiesPropertySource;
 import org.springframework.core.env.PropertySource;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.type.filter.AnnotationTypeFilter;
+import org.springframework.util.StringUtils;
 
 import java.io.*;
 import java.lang.reflect.Field;
@@ -28,21 +30,58 @@ import java.util.*;
 @Order(Integer.MAX_VALUE)
 public class BootConfigProcessor implements EnvironmentPostProcessor {
     private static ConfigurableEnvironment configurableEnvironment;
-    private static String[] scanPath;
-    private static String[] filePath;
-    private static String packageName;
+    private static String[] scanPath = new String[0];
+    private static String[] filePath = new String[0];
+    //启动类
+    private static Class<?>[] startClazz = new Class[0];
+    private static String[] packageName = new String[0];
+    private static Set<String> beanClazzSet = new HashSet<>();
     private static final Map<String, Map<Properties, List<BeanRef>>> placeHolderRefMap = new HashMap<>();
 
     @Override
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
         configurableEnvironment = environment;
         Class<?> mainApplicationClass = application.getMainApplicationClass();
-        boolean enable = loadDynamicValBeanRef(mainApplicationClass);
-        if (enable) {
+        startClazz = ArrayUtil.append(startClazz, mainApplicationClass);
+        boolean enable = false;
+        for (Class<?> clazz : startClazz) {
+            //加载所有注解定义的路径和类
+            enable = loadDynamicValBeanRef(clazz) || enable;
+        }
+        if (enable || filePath.length > 0 || scanPath.length > 0) {
             log.info("====BootConfigProcessor 加载外部配置文件开始==== {}", mainApplicationClass);
             tryLoadLocationConfig();
             clearAllRef();
         }
+    }
+
+
+    public static void tryScanAndLoad(Class<?> clazz) {
+        if (loadDynamicValBeanRef(clazz)) {
+            tryLoadLocationConfig();
+            clearAllRef();
+        }
+    }
+
+    public static Set<String> getBeanClazz() {
+        return beanClazzSet;
+    }
+
+    //packageName
+    public static void addPackageName(String... name) {
+        packageName = ArrayUtil.append(packageName, name);
+    }
+
+    public static void addScanPath(String... path) {
+        scanPath = ArrayUtil.append(scanPath, path);
+    }
+
+    public static void addFilePath(String... path) {
+        filePath = ArrayUtil.append(filePath, path);
+    }
+
+    public static void addStartClazz(Class<?>... clazz) {
+        startClazz = ArrayUtil.append(startClazz, clazz);
     }
 
     public static String getVal(String key) {
@@ -58,7 +97,7 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
         return propertySources.get(name);
     }
 
-    private boolean loadDynamicValBeanRef(Class<?> mainClazz) {
+    private static boolean loadDynamicValBeanRef(Class<?> mainClazz) {
         // 获取ClassLoader
         ClassLoader classLoader = BootConfigProcessor.class.getClassLoader();
         // 使用ClassLoader加载SpringApplication类
@@ -66,9 +105,9 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
         try {
             EnableDynamicVal enableDynamicVal = AnnotationUtils.findAnnotation(mainClazz, EnableDynamicVal.class);
             if (enableDynamicVal != null) {
-                packageName = mainClazz.getPackage().getName();
-                scanPath = enableDynamicVal.scanPath();
-                filePath = enableDynamicVal.filePath();
+                addPackageName(mainClazz.getPackage().getName());
+                addScanPath(enableDynamicVal.scanPath());
+                addFilePath(enableDynamicVal.filePath());
             } else {
                 return false;
             }
@@ -99,6 +138,8 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
                 if (annotation != null) {
                     //合并子注解属性: 用于扩展其他自定义注解@AliasFor
                     annotation = AnnotatedElementUtils.getMergedAnnotation(clazz, DynamicValConfig.class);
+                    //添加bean类
+                    beanClazzSet.add(candidate.getBeanClassName());
                 }
                 classesWithAnnotation.add(annotation);
             } catch (ClassNotFoundException e) {
@@ -109,12 +150,17 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
         return classesWithAnnotation;
     }
 
-    private void tryLoadLocationConfig() {
+    private static void tryLoadLocationConfig() {
         List<Properties> result = new ArrayList<>();
         try {
-            Set<DynamicValConfig> configs = scanClassesWithDynamicValConfig(packageName);
-            if (scanPath != null) {
-                for (String path : scanPath) {
+            Set<DynamicValConfig> configs = new HashSet<>();
+            for (String p : packageName) {
+                if (StringUtils.hasLength(p)) {
+                    configs.addAll(scanClassesWithDynamicValConfig(p));
+                }
+            }
+            for (String path : scanPath) {
+                if (StringUtils.hasLength(path)) {
                     configs.addAll(scanClassesWithDynamicValConfig(path));
                 }
             }
@@ -122,17 +168,19 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
                 String file = config.file();
                 String type = config.fileType();
                 String prefix = config.prefix();
-                List<String> filePathList = new ArrayList<>(Arrays.asList(filePath));
+                HashSet<String> filePathList = new HashSet<>(Arrays.asList(filePath));
                 //classpath自己
                 filePathList.add("");
                 for (String path : filePathList) {
                     InputStream inputStream = null;
+                    //完整路径读取
                     if (path.startsWith(File.separator)) {
                         File localFile = new File(path + "/" + file);
                         if (localFile.exists() && localFile.isFile()) {
                             inputStream = new FileInputStream(path + "/" + file);
                         }
                     } else {
+                        //classpath读
                         if (new ClassPathResource(path + "/" + file).exists()) {
                             inputStream = new ClassPathResource(path + "/" + file).getInputStream();
                         }
@@ -172,7 +220,7 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
      * @param v
      * @param properties
      */
-    private void addRef(Object k, Object v, Properties properties) {
+    private static void addRef(Object k, Object v, Properties properties) {
         //如果结果有占位符，则添加引用，等待更新
         if (SpelUtil.isPlaceholder(v.toString())) {
             String placeholder = SpelUtil.parsePlaceholder(v.toString());
@@ -190,7 +238,7 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
      * @param k
      * @param v
      */
-    private void refreshOtherRef(Object k, Object v) {
+    private static void refreshOtherRef(Object k, Object v) {
         //主动通知更新
         Map<Properties, List<BeanRef>> map = placeHolderRefMap.get(k);
         //能找到有引用的配置，且占位符已经被解析了
@@ -223,7 +271,7 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
     /**
      * 清除所有引用
      */
-    private void clearAllRef() {
+    private static void clearAllRef() {
         placeHolderRefMap.values().forEach(Map::clear);
         placeHolderRefMap.clear();
     }
