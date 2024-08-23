@@ -23,6 +23,7 @@ import org.springframework.core.annotation.AnnotationUtils;
 import org.springframework.core.annotation.Order;
 import org.springframework.core.env.PropertiesPropertySource;
 import org.springframework.expression.spel.support.StandardEvaluationContext;
+import org.springframework.util.PropertyPlaceholderHelper;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
@@ -44,6 +45,7 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor, Applicati
     private static final Map<String, ConcurrentHashMap<Object, CopyOnWriteArrayList<BeanRef>>> dynamicValBeanRefMap = new ConcurrentHashMap<>();
     //bean对应的placeholder <bean,placeholder>
     private static final Map<Object, ConcurrentHashSet<String>> beanPlaceHolder = new ConcurrentHashMap<>();
+
 
     @Override
     public Object postProcessBeforeInitialization(Object bean, String beanName) throws BeansException {
@@ -139,7 +141,7 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor, Applicati
         //删除已有引用记录
         removeBeanRef(bean);
         //解析并更新配置
-        parseAndUpdate(newConfig, bean, prefix);
+        parseAndUpdate(newConfig, bean);
         //更新配置到环境
         updateConfigToEnv(file, newConfig);
         //加载配置并更新bean
@@ -157,14 +159,17 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor, Applicati
         BootConfigProcessor.setVal(new PropertiesPropertySource(file, newConfig));
     }
 
+    protected static final PropertyPlaceholderHelper propertyPlaceholderHelper = new PropertyPlaceholderHelper("${", "}", ":", true);
+    protected static final PropertyPlaceholderHelper computePlaceholderHelper = new PropertyPlaceholderHelper("#{", "}", ":", true);
+
+
     /**
      * 解析并更新配置
      *
      * @param newConfig
      * @param bean
-     * @param prefix
      */
-    protected static Properties parseAndUpdate(Properties newConfig, Object bean, String prefix) {
+    protected static Properties parseAndUpdate(Properties newConfig, Object bean) {
         //将新的配置放入SPEL环境中
         for (Object key : newConfig.keySet()) {
             Object value = newConfig.get(key);
@@ -231,9 +236,17 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor, Applicati
                         String tmp = parseFormatParam(newConfig, key, innerPlaceholder, bean, visitedKeys);
                         if (!Objects.equals(tmp, innerPlaceholder)) {
                             if (prefix.contains("#")) {
-                                innerPlaceholder = parseNoWrapper(evaluationContext, tmp);
+                                String wrapper = wrapper(tmp, "#");
+                                innerPlaceholder = computePlaceholderHelper.replacePlaceholders(wrapper, newConfig);
+                                if (wrapper.equals(innerPlaceholder)) {
+                                    innerPlaceholder = parseNoWrapper(evaluationContext, tmp);
+                                }
                             } else if (prefix.contains("$")) {
-                                innerPlaceholder = parseWithWrapper(evaluationContext, tmp);
+                                String wrapper = wrapper(tmp, "$");
+                                innerPlaceholder = propertyPlaceholderHelper.replacePlaceholders(wrapper, newConfig);
+                                if (wrapper.equals(innerPlaceholder)) {
+                                    innerPlaceholder = parseWithWrapper(evaluationContext, tmp);
+                                }
                             }
                             placeholder = placeholder.substring(0, headHolderIdx) + innerPlaceholder + (endIdx + 1 > placeholder.length() ? "" : placeholder.substring(endIdx + 1));
                         } else {
@@ -246,14 +259,20 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor, Applicati
                         }
                     } else {
                         String value = null;
-                        if (StringUtils.hasLength(innerPlaceholder)) {
+                        if (StringUtils.hasLength(placeholder)) {
                             //自我解析最新值
                             if (prefix.contains("#")) {
-                                value = SpelUtil.parseNoWrapper(evaluationContext, innerPlaceholder);
+                                value = computePlaceholderHelper.replacePlaceholders(placeholder, newConfig);
+                                if (placeholder.equals(value)) {
+                                    value = SpelUtil.parseNoWrapper(evaluationContext, innerPlaceholder);
+                                }
                             } else {
-                                value = SpelUtil.parseWithWrapper(evaluationContext, innerPlaceholder);
+                                value = propertyPlaceholderHelper.replacePlaceholders(placeholder, newConfig);
+                                if (placeholder.equals(value)) {
+                                    value = SpelUtil.parseWithWrapper(evaluationContext, innerPlaceholder);
+                                }
                             }
-                            if (value == null) {
+                            if (value == null || value.equals(placeholder)) {
                                 //如果占位符不能从自己种获取到，则从上下文中获取
                                 try {
                                     String wrapperVal = null;
@@ -360,13 +379,6 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor, Applicati
                     Object newVal = newConfig.get(key);
                     //不能直接简单的使用替换，而需要严格的解析
                     //todo getOriginalValue
-                    newKV.put(targetKey, beanRef.getOriginalValue().toString().replace("${" + beanRef.getPlaceHolder() + "}", newVal == null ? null : newVal.toString()));
-                    try {
-                        //给bean赋新的值
-                        loadConfigBeanByPrefix(targetPrefix, newKV, refBean);
-                    } catch (Exception e) {
-                        throw new RuntimeException(e);
-                    }
                 }
             });
         }

@@ -24,6 +24,7 @@ import org.springframework.util.StringUtils;
 import java.io.*;
 import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.*;
 
 @Slf4j
@@ -151,7 +152,6 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
     }
 
     private static void tryLoadLocationConfig() {
-        List<Properties> result = new ArrayList<>();
         try {
             Set<DynamicValConfig> configs = new HashSet<>();
             for (String p : packageName) {
@@ -164,34 +164,59 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
                     configs.addAll(scanClassesWithDynamicValConfig(path));
                 }
             }
+            Map<String, Properties> propertiesMap = new HashMap<>();
+            Map<String, HashSet<DynamicValConfig>> configBeanMap = new HashMap<>();
+            //解析出来所有的配置文件
             for (DynamicValConfig config : configs) {
                 String file = config.file();
-                String type = config.fileType();
-                String prefix = config.prefix();
+                String filename = config.file();
+                String fileType = config.fileType();
                 HashSet<String> filePathList = new HashSet<>(Arrays.asList(filePath));
                 //classpath自己
                 filePathList.add("");
                 for (String path : filePathList) {
-                    InputStream inputStream = null;
                     //完整路径读取
                     if (path.startsWith(File.separator)) {
                         File localFile = new File(path + "/" + file);
                         if (localFile.exists() && localFile.isFile()) {
-                            inputStream = new FileInputStream(path + "/" + file);
+                            String absolutePath = localFile.getAbsolutePath();
+                            Properties properties = propertiesMap.get(absolutePath);
+                            if (properties == null) {
+                                properties = convertProperties(localFile, filename, fileType);
+                                propertiesMap.put(absolutePath, properties);
+                            }
+                            //must inputStream!=null
+                            //inputStream已经存在了，直接添加ConfigBean
+                            configBeanMap.putIfAbsent(absolutePath, new HashSet<>());
+                            configBeanMap.get(absolutePath).add(config);
                         }
                     } else {
                         //classpath读
-                        if (new ClassPathResource(path + "/" + file).exists()) {
-                            inputStream = new ClassPathResource(path + "/" + file).getInputStream();
+                        ClassPathResource classPathResource = new ClassPathResource(path + "/" + file);
+                        if (classPathResource.exists() && classPathResource.isFile()) {
+                            String absolutePath = classPathResource.getFile().getAbsolutePath();
+                            Properties properties = propertiesMap.get(absolutePath);
+                            if (properties == null) {
+                                properties = convertProperties(classPathResource.getFile(), filename, fileType);
+                                propertiesMap.put(absolutePath, properties);
+                            }
+                            //must inputStream!=null
+                            //inputStream已经存在了，直接添加ConfigBean
+                            configBeanMap.putIfAbsent(absolutePath, new HashSet<>());
+                            configBeanMap.get(absolutePath).add(config);
                         }
                     }
-                    if (inputStream != null) {
-                        try (InputStream input = inputStream) {
-                            String data = convertToString(input);
-                            Properties properties = DynamicValBeanPostProcessor.convertProperties(data, file, type);
+                }
+            }
+            //加载配置文件
+            {
+                configBeanMap.forEach((path, configHashSet) -> {
+                    final Properties properties = propertiesMap.get(path);
+                    configHashSet.forEach(configBean -> {
+                        try {
+                            String file = configBean.file();
                             //解析并更新
-                            //org.springframework.util.PropertyPlaceholderHelper.parseStringValue
-                            DynamicValBeanPostProcessor.parseAndUpdate(properties, null, config.prefix());
+                            DynamicValBeanPostProcessor.parseAndUpdate(properties, null);
                             //刷新到环境变量中去
                             BootConfigProcessor.setVal(new PropertiesPropertySource(file, properties));
                             //添加引用
@@ -199,17 +224,35 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
                                 addRef(k, v, properties);
                                 refreshOtherRef(k, v);
                             });
-                            break;
                         } catch (Exception e) {
                             log.error("bootConfigProcessor-err:{}", e.getMessage(), e);
                         }
-                    }
-                }
+                    });
+                });
             }
             log.info("====BootConfigProcessor 加载外部配置文件完毕====");
         } catch (Exception e) {
             log.error("bootConfigProcessor-err:{}", e.getMessage(), e);
+            throw new RuntimeException(e);
         }
+    }
+
+    /**
+     * 转换file -> Properties
+     *
+     * @param fileAbsolutePath
+     * @param filename
+     * @param fileType
+     * @return
+     * @throws IOException
+     */
+    public static Properties convertProperties(File fileAbsolutePath, String filename, String fileType) throws IOException {
+        //存放inputStream
+        InputStream inputStream = Files.newInputStream(fileAbsolutePath.toPath());
+        String data = convertToString(inputStream);
+        Properties properties = DynamicValBeanPostProcessor.convertProperties(data, filename, fileType);
+        inputStream.close();
+        return properties;
     }
 
 
@@ -244,13 +287,8 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
         //能找到有引用的配置，且占位符已经被解析了
         if (map != null && !SpelUtil.isPlaceholder(v.toString())) {
             map.values().parallelStream().forEach(beanRefs -> {
-                //这里不应该是解析数据，而是通知bean，bean的对应的引用属性有变化，需要单独重新加载这个属性值
-                //进而可以刷新
-                for (BeanRef beanRef : beanRefs) {
-                    Properties p = (Properties) beanRef.getBean();
-                    //todo getOriginalValue
-                    p.setProperty(beanRef.getKey(), beanRef.getOriginalValue().toString().replace("${" + beanRef.getPlaceHolder() + "}", v.toString()));
-                }
+                //todo 通知bean，bean的对应的引用属性有变化，需要单独重新加载这个属性值
+                //进而可以刷新bean
             });
         }
     }

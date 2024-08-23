@@ -2,6 +2,7 @@ package com.lingfengx.mid.dynamic.config.ann;
 
 import com.lingfengx.mid.dynamic.config.BootConfigProcessor;
 import com.lingfengx.mid.dynamic.config.DynamicValListenerRegister;
+import lombok.EqualsAndHashCode;
 import org.springframework.stereotype.Component;
 
 import java.lang.annotation.*;
