@@ -16,7 +16,7 @@
     <url>https://github.com/lingfengcoder/dynamic-config</url>
     <description>基于springboot2.0的自定义动态配置注解</description>
     <properties>
-        <revision>1.0.5-SNAPSHOT</revision>
+        <revision>1.0.5</revision>
         <maven.compiler.source>8</maven.compiler.source>
         <maven.compiler.target>8</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -163,20 +163,9 @@
                     </execution>
                 </executions>
             </plugin>
-
-            <!--新账号的配置：将组件部署到OSSRH并将其发布到Central Repository-->
-            <plugin>
-                <groupId>org.sonatype.central</groupId>
-                <artifactId>central-publishing-maven-plugin</artifactId>
-                <version>0.4.0</version>
-                <extensions>true</extensions>
-                <configuration>
-                    <publishingServerId>ossrh</publishingServerId>
-                    <tokenAuth>true</tokenAuth>
-                </configuration>
-            </plugin>
         </plugins>
     </build>
+
 
 
     <distributionManagement>
@@ -186,7 +175,5 @@
             <url>https://central.sonatype.com/</url>
         </snapshotRepository>
     </distributionManagement>
-
-
 
 </project>
