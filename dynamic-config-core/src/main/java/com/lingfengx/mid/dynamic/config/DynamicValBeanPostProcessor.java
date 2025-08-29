@@ -8,8 +8,8 @@ import com.lingfengx.mid.dynamic.config.dto.BeanRef;
 import com.lingfengx.mid.dynamic.config.event.ConfigRefreshEvent;
 import com.lingfengx.mid.dynamic.config.parser.ConfigFileTypeEnum;
 import com.lingfengx.mid.dynamic.config.parser.ConfigParserHandler;
+import com.lingfengx.mid.dynamic.config.util.EarlyLogUtil;
 import com.lingfengx.mid.dynamic.config.util.SpelUtil;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.aop.framework.AopProxyUtils;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.config.BeanPostProcessor;
@@ -27,6 +27,7 @@ import org.springframework.util.PropertyPlaceholderHelper;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -37,10 +38,10 @@ import static com.lingfengx.mid.dynamic.config.util.SpelUtil.*;
  * 动态配置注解处理器
  */
 
-@Slf4j
 @Order(Integer.MAX_VALUE)
 public class DynamicValBeanPostProcessor implements BeanPostProcessor, ApplicationContextAware {
-    private static ApplicationContext applicationContext;
+    private ApplicationContext applicationContext;
+    private static ApplicationContext staticApplicationContext;
     //<${placeholder},<bean,[key1,key2]>>
     private static final Map<String, ConcurrentHashMap<Object, CopyOnWriteArrayList<BeanRef>>> dynamicValBeanRefMap = new ConcurrentHashMap<>();
     //bean对应的placeholder <bean,placeholder>
@@ -51,27 +52,66 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor, Applicati
     public Object postProcessBeforeInitialization(Object bean, String beanName) throws BeansException {
 
         Class<?> clazz = AopProxyUtils.ultimateTargetClass(bean);
-        DynamicValConfig baseAnnotation = AnnotationUtils.findAnnotation(clazz, DynamicValConfig.class);
-        if (baseAnnotation != null) {
+        DynamicValConfig annotation = AnnotationUtils.findAnnotation(clazz, DynamicValConfig.class);
+        if (annotation != null) {
             //合并子注解属性: 用于扩展其他自定义注解@AliasFor
-            baseAnnotation = AnnotatedElementUtils.getMergedAnnotation(clazz, DynamicValConfig.class);
+            annotation = AnnotatedElementUtils.getMergedAnnotation(clazz, DynamicValConfig.class);
         }
-        if (baseAnnotation != null) {
-            checkParam(baseAnnotation);
-            String file = baseAnnotation.file();
-            String prefix = baseAnnotation.prefix();
-            String fileType = baseAnnotation.fileType();
-            if (fileType == null || fileType.isEmpty()) {
-                fileType = file.toLowerCase().substring(file.lastIndexOf(".") + 1);
-            }
-            final String finalFileType = fileType;
-            //注册监听
-            Class<? extends DynamicValListenerRegister> listenerRegister = baseAnnotation.listener();
-            //注册适配器
-            DynamicValListenerRegister adapter = applicationContext.getBean(listenerRegister);
-            adapter.register(file, prefix, data -> process(data, file, prefix, finalFileType, bean));
+        if (annotation == null) {
+            return bean;
         }
+
+        String file = annotation.file();
+        String prefix = annotation.prefix();
+        String fileTypeStr = annotation.fileType();
+        String sourceType = annotation.sourceType(); // 获取配置源类型
+        if (sourceType == null || sourceType.isEmpty()) {
+            fileTypeStr = file.toLowerCase().substring(file.lastIndexOf(".") + 1);
+        }
+        ConfigFileTypeEnum fileType = ConfigFileTypeEnum.of(fileTypeStr);
+
+        DynamicValListenerRegister adapter = getAdapter(file);
+        if (adapter == null) {
+            EarlyLogUtil.warn("[dynamic-config] no adapter found for file: " + file + " with source type: " + sourceType);
+            return bean;
+        }
+
+        // 使用新的重载方法，传递额外配置
+        String finalFileTypeStr = fileTypeStr;
+        adapter.register(file, prefix, data -> process(data, file, prefix, finalFileTypeStr, bean), annotation);
+
         return bean;
+    }
+
+
+    /**
+     * 根据文件路径、配置源类型和文件类型获取对应的适配器
+     */
+    private DynamicValListenerRegister getAdapter(String file) {
+        if (staticApplicationContext == null) {
+            EarlyLogUtil.warn("[dynamic-config] application context is null, cannot get adapter for file: " + file);
+            return null;
+        }
+
+        try {
+            // 获取所有可用的适配器
+            Map<String, DynamicValListenerRegister> adapters = staticApplicationContext.getBeansOfType(DynamicValListenerRegister.class);
+            
+            // 遍历所有适配器，找到第一个适用于该文件的适配器
+            for (DynamicValListenerRegister adapter : adapters.values()) {
+                if (adapter.isAvailable(file)) {
+                    EarlyLogUtil.debug("[dynamic-config] selected adapter for file: " + file + " (" + adapter.getClass().getSimpleName() + ")");
+                    return adapter;
+                }
+            }
+            
+            EarlyLogUtil.warn("[dynamic-config] no suitable adapter found for file: " + file);
+            return null;
+
+        } catch (Exception e) {
+            EarlyLogUtil.error("[dynamic-config] error getting adapter for file: " + file, e);
+            return null;
+        }
     }
 
     /**
@@ -106,7 +146,7 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor, Applicati
     protected static void process(String data, String file, String prefix, String fileType, Object bean) {
         try {
             if (!StringUtils.hasLength(data)) {
-                log.warn("[dynamic-config] config has null data {}", file);
+                EarlyLogUtil.warn("[dynamic-config] config has null data " + file);
                 return;
             }
             Properties newConfig = convertProperties(data, file, fileType);
@@ -115,11 +155,11 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor, Applicati
             }
             Object newBean = load(newConfig, file, prefix, bean);
             //发布配置更新的事件
-            if (applicationContext != null && newBean != null) {
-                applicationContext.publishEvent(new ConfigRefreshEvent(file, prefix, newBean));
+            if (staticApplicationContext != null && newBean != null) {
+                staticApplicationContext.publishEvent(new ConfigRefreshEvent(file, prefix, newBean));
             }
         } catch (Exception e) {
-            log.error("[dynamic-config] dynamic config error {} ", e.getMessage(), e);
+            EarlyLogUtil.error("[dynamic-config] dynamic config error " + e.getMessage(), e);
 //            throw new RuntimeException("process dynamic config error", e);
         }
     }
@@ -212,9 +252,9 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor, Applicati
         }
         String placeholder = originalVal;
         //将新的配置放入SPEL环境中
-        StandardEvaluationContext evaluationContext = SpelUtil.transEvaluationContext(newConfig);
+        StandardEvaluationContext evaluationContext = transEvaluationContext(newConfig);
         //如果包含占位符
-        if (SpelUtil.isPlaceholder(originalVal) || SpelUtil.isComputesPlaceholder(originalVal)) {
+        if (isPlaceholder(originalVal) || isComputesPlaceholder(originalVal)) {
             while (isPlaceholder(placeholder) || isComputesPlaceholder(placeholder)) {
                 int headHolderIdx = minPlaceholderIdx(placeholder, 0);
                 int endIdx = getEndIdx(placeholder);
@@ -264,12 +304,12 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor, Applicati
                             if (prefix.contains("#")) {
                                 value = computePlaceholderHelper.replacePlaceholders(placeholder, newConfig);
                                 if (placeholder.equals(value)) {
-                                    value = SpelUtil.parseNoWrapper(evaluationContext, innerPlaceholder);
+                                    value = parseNoWrapper(evaluationContext, innerPlaceholder);
                                 }
                             } else {
                                 value = propertyPlaceholderHelper.replacePlaceholders(placeholder, newConfig);
                                 if (placeholder.equals(value)) {
-                                    value = SpelUtil.parseWithWrapper(evaluationContext, innerPlaceholder);
+                                    value = parseWithWrapper(evaluationContext, innerPlaceholder);
                                 }
                             }
                             if (value == null || value.equals(placeholder)) {
@@ -287,7 +327,7 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor, Applicati
                                         value = innerPlaceholder;
                                     }
                                 } catch (Exception e) {
-                                    log.error("parseFormatParam error:{} {}", e.getMessage(), ExceptionUtil.getMessage(e));
+                                    EarlyLogUtil.error("parseFormatParam error:" + e.getMessage() + " " + ExceptionUtil.getMessage(e), e);
                                 }
                             }
                             //todo 无论有没有解析出来，都要则进行记录，以便后续级联刷新
@@ -400,7 +440,7 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor, Applicati
             Object o = binder.bind(prefix, Bindable.ofInstance(bean)).get();
             return (T) o;
         } catch (Exception e) {
-            log.error("load config err:{}{}{}", prefix, bean.getClass(), configInfo, e);
+            EarlyLogUtil.error("load config err:" + prefix + bean.getClass() + configInfo, e);
         }
         return null;
     }
@@ -409,6 +449,8 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor, Applicati
     @Override
     public void setApplicationContext(ApplicationContext applicationContext) throws BeansException {
         this.applicationContext = applicationContext;
+        // 设置静态引用以便其他静态方法使用
+        DynamicValBeanPostProcessor.staticApplicationContext = applicationContext;
     }
 
 
@@ -428,7 +470,7 @@ public class DynamicValBeanPostProcessor implements BeanPostProcessor, Applicati
         String placeholder = "#{'${shaman.s.aliyun.aksk}'.split(',')[0]}";
 //        placeholder = "abc_#{${age1}*${age2}}";
 
-        StandardEvaluationContext evaluationContext = SpelUtil.transEvaluationContext(properties);
+        StandardEvaluationContext evaluationContext = transEvaluationContext(properties);
         String name1 = parseWithWrapper(evaluationContext, "name");
         System.out.println(name1);
 

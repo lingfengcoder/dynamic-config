@@ -1,0 +1,9 @@
+local-demo:
+  name: "本地文件配置示例"
+  port: 8080
+  enabled: true
+  updateTime: 2024-01-01
+  settings:
+    timeout: 30
+    retryCount: 3
+    cacheSize: 1000 

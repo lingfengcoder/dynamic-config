@@ -6,6 +6,7 @@
       <list>
         <option value="$PROJECT_DIR$/pom.xml" />
         <option value="$PROJECT_DIR$/dynamic-x-configmap/pom.xml" />
+        <option value="$PROJECT_DIR$/dynamic-config-starter/pom.xml" />
       </list>
     </option>
   </component>

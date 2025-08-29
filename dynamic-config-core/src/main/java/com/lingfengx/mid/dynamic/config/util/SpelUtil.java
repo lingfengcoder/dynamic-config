@@ -1,6 +1,5 @@
 package com.lingfengx.mid.dynamic.config.util;
 
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.expression.Expression;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
 import org.springframework.expression.spel.support.StandardEvaluationContext;
@@ -9,7 +8,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
 
-@Slf4j
 public class SpelUtil {
     //$符号
     public static final String PLACEHOLDER_PREFIX = "${";
@@ -98,7 +96,7 @@ public class SpelUtil {
             return expression.getValue(context, String.class);
         } catch (Exception e) {
             e.printStackTrace();
-            log.warn("parse error {}", e.getMessage());
+            EarlyLogUtil.warn("parse error " + e.getMessage());
         }
         return null;
     }
@@ -163,36 +161,5 @@ public class SpelUtil {
     }
 
 
-    public static void main(String[] args) {
 
-        // 创建 Map 对象
-        Map<String, Object> map = new HashMap<>();
-        map.put("demo.age", 25);
-        map.put("demo.name", "lingfeng");
-        map.put("name", "xx-lingfeng");
-        map.put("name", "xx-lingfeng");
-        map.put("shaman.s.aliyun.aksk", "this_is_ak,this_is_sk");
-
-        String placeholder = "shaman.s.aliyun.aksk";
-        Properties properties = new Properties();
-
-        map.forEach((k, v) -> properties.setProperty(k, v.toString()));
-        // 创建标准评估上下文
-        StandardEvaluationContext context = new StandardEvaluationContext();
-//        context.setRootObject(properties);
-        map.forEach(context::setVariable);
-
-        // 创建 Spel 表达式解析器
-        SpelExpressionParser parser = new SpelExpressionParser();
-        Expression expression = null;
-        String age = null;
-        // 解析和评估表达式
-        expression = parser.parseExpression("'this_is_ak,this_is_sk'.split(',')[0]");
-        age = expression.getValue(context, String.class);
-        System.out.println(age);
-
-        expression = parser.parseExpression("#name");
-        age = expression.getValue(context, String.class);
-        System.out.println(age);
-    }
 }

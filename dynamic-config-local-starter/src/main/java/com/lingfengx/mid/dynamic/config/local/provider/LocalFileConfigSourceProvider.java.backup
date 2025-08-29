@@ -1,0 +1,265 @@
+package com.lingfengx.mid.dynamic.config.local.provider;
+
+import com.lingfengx.mid.dynamic.config.ConfigSourceProvider;
+import com.lingfengx.mid.dynamic.config.DynamicValListener;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+import org.springframework.util.StringUtils;
+
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardWatchEventKinds;
+import java.nio.file.WatchEvent;
+import java.nio.file.WatchKey;
+import java.nio.file.WatchService;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
+/**
+ * 本地文件配置源提供者
+ * 支持从本地文件系统或classpath加载配置
+ */
+public class LocalFileConfigSourceProvider implements ConfigSourceProvider {
+    
+    private static final Logger log = LoggerFactory.getLogger(LocalFileConfigSourceProvider.class);
+    
+    private final ConcurrentHashMap<String, DynamicValListener> listeners = new ConcurrentHashMap<>();
+    private final ExecutorService watchExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "local-file-config-watcher");
+        t.setDaemon(true);
+        return t;
+    });
+    
+    @Override
+    public String getSourceType() {
+        return "local";
+    }
+    
+    @Override
+    public int getPriority() {
+        return 100; // 本地配置源优先级较高
+    }
+    
+    @Override
+    public boolean isAvailable(String location) {
+        if (!StringUtils.hasText(location)) {
+            return false;
+        }
+        
+        // 移除可能的协议前缀
+        String cleanLocation = location.replaceFirst("^local://", "");
+        
+        // 1. 首先检查是否为classpath资源
+        if (cleanLocation.startsWith("classpath:")) {
+            String classpathPath = cleanLocation.substring("classpath:".length());
+            try {
+                ClassPathResource resource = new ClassPathResource(classpathPath);
+                return resource.exists();
+            } catch (Exception e) {
+                log.debug("Classpath resource not found: {}", classpathPath);
+                return false;
+            }
+        }
+        
+        // 2. 尝试从classpath中查找文件（不带classpath:前缀的情况）
+        try {
+            ClassPathResource classpathResource = new ClassPathResource(cleanLocation);
+            if (classpathResource.exists()) {
+                log.debug("Found file in classpath: {}", cleanLocation);
+                return true;
+            }
+        } catch (Exception e) {
+            log.debug("File not found in classpath: {}", cleanLocation);
+        }
+        
+        // 3. 检查是否为绝对路径
+        if (cleanLocation.startsWith(File.separator) || 
+            (cleanLocation.length() > 2 && cleanLocation.charAt(1) == ':')) {
+            Path path = Paths.get(cleanLocation);
+            boolean exists = Files.exists(path);
+            if (exists) {
+                log.debug("Found file at absolute path: {}", cleanLocation);
+            }
+            return exists;
+        }
+        
+        // 4. 检查相对路径
+        Path relativePath = Paths.get(cleanLocation);
+        boolean exists = Files.exists(relativePath);
+        if (exists) {
+            log.debug("Found file at relative path: {}", cleanLocation);
+        }
+        return exists;
+    }
+    
+    @Override
+    public String loadConfig(String location) {
+        if (!isAvailable(location)) {
+            throw new RuntimeException("Local file config source not available for location: " + location);
+        }
+        
+        try {
+            // 移除可能的协议前缀
+            String cleanLocation = location.replaceFirst("^local://", "");
+            
+            Resource resource = null;
+            
+            // 1. 首先检查是否为classpath资源
+            if (cleanLocation.startsWith("classpath:")) {
+                String classpathPath = cleanLocation.substring("classpath:".length());
+                resource = new ClassPathResource(classpathPath);
+                log.debug("Loading from classpath with explicit prefix: {}", classpathPath);
+            } else {
+                // 2. 尝试从classpath中查找文件（不带classpath:前缀的情况）
+                try {
+                    ClassPathResource classpathResource = new ClassPathResource(cleanLocation);
+                    if (classpathResource.exists()) {
+                        resource = classpathResource;
+                        log.debug("Loading from classpath: {}", cleanLocation);
+                    }
+                } catch (Exception e) {
+                    log.debug("File not found in classpath: {}", cleanLocation);
+                }
+                
+                // 3. 如果classpath中找不到，尝试文件系统
+                if (resource == null) {
+                    resource = new FileSystemResource(cleanLocation);
+                    log.debug("Loading from file system: {}", cleanLocation);
+                }
+            }
+            
+            if (resource == null) {
+                throw new RuntimeException("No suitable resource found for location: " + location);
+            }
+            
+            try (InputStream inputStream = resource.getInputStream()) {
+                byte[] bytes = readAllBytes(inputStream);
+                String content = new String(bytes, StandardCharsets.UTF_8);
+                log.info("Successfully loaded local file config from: {} (resource type: {})", 
+                        cleanLocation, resource.getClass().getSimpleName());
+                return content;
+            }
+            
+        } catch (IOException e) {
+            log.error("Failed to load local file config from: {}", location, e);
+            throw new RuntimeException("Failed to load local file configuration", e);
+        }
+    }
+    
+    @Override
+    public CompletableFuture<String> loadConfigAsync(String location) {
+        return CompletableFuture.supplyAsync(() -> loadConfig(location));
+    }
+    
+    @Override
+    public void registerListener(String location, DynamicValListener listener) {
+        if (!isAvailable(location)) {
+            log.warn("Cannot register listener for unavailable location: {}", location);
+            return;
+        }
+        
+        listeners.put(location, listener);
+        
+        // 启动文件监听（仅对本地文件系统有效）
+        String cleanLocation = location.replaceFirst("^local://", "");
+        if (!cleanLocation.startsWith("classpath:")) {
+            startFileWatcher(cleanLocation, listener);
+        }
+        
+        log.info("Registered listener for local file config: {}", location);
+    }
+    
+    @Override
+    public void removeListener(String location, DynamicValListener listener) {
+        listeners.remove(location);
+        log.info("Removed listener for local file config: {}", location);
+    }
+    
+    /**
+     * 启动文件监听器
+     */
+    private void startFileWatcher(String filePath, DynamicValListener listener) {
+        try {
+            Path path = Paths.get(filePath);
+            Path parentDir = path.getParent();
+            
+            if (parentDir == null || !Files.exists(parentDir)) {
+                log.warn("Parent directory does not exist for file watching: {}", filePath);
+                return;
+            }
+            
+            watchExecutor.submit(() -> {
+                try (WatchService watchService = FileSystems.getDefault().newWatchService()) {
+                    parentDir.register(watchService, StandardWatchEventKinds.ENTRY_MODIFY);
+                    
+                    log.info("Started file watcher for: {}", filePath);
+                    
+                    while (!Thread.currentThread().isInterrupted()) {
+                        WatchKey key = watchService.take();
+                        
+                        for (WatchEvent<?> event : key.pollEvents()) {
+                            WatchEvent.Kind<?> kind = event.kind();
+                            
+                            if (kind == StandardWatchEventKinds.OVERFLOW) {
+                                continue;
+                            }
+                            
+                            @SuppressWarnings("unchecked")
+                            WatchEvent<Path> ev = (WatchEvent<Path>) event;
+                            Path fileName = ev.context();
+                            Path fullPath = parentDir.resolve(fileName);
+                            
+                            if (fullPath.toString().equals(filePath)) {
+                                log.info("Detected file change: {}", filePath);
+                                
+                                // 延迟一下，确保文件写入完成
+                                Thread.sleep(100);
+                                
+                                try {
+                                    String newContent = loadConfig("local://" + filePath);
+                                    listener.onChange(newContent);
+                                } catch (Exception e) {
+                                    log.error("Failed to reload config after file change: {}", filePath, e);
+                                }
+                            }
+                        }
+                        
+                        if (!key.reset()) {
+                            break;
+                        }
+                    }
+                } catch (Exception e) {
+                    log.error("Error in file watcher for: {}", filePath, e);
+                }
+            });
+            
+        } catch (Exception e) {
+            log.error("Failed to start file watcher for: {}", filePath, e);
+        }
+    }
+    
+    /**
+     * Java 8兼容的readAllBytes方法
+     */
+    private byte[] readAllBytes(InputStream inputStream) throws IOException {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        int nRead;
+        byte[] data = new byte[1024];
+        while ((nRead = inputStream.read(data, 0, data.length)) != -1) {
+            buffer.write(data, 0, nRead);
+        }
+        return buffer.toByteArray();
+    }
+} 

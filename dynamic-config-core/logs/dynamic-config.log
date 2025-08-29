@@ -1,0 +1,3 @@
+2025-08-28 16:31:15.647 [com.lingfengx.mid.dynamic.config.util.TestEarlyLogUtil.main()] INFO  DynamicConfig - 测试信息日志
+2025-08-28 16:31:15.650 [com.lingfengx.mid.dynamic.config.util.TestEarlyLogUtil.main()] WARN  DynamicConfig - 测试警告日志
+2025-08-28 16:31:15.650 [com.lingfengx.mid.dynamic.config.util.TestEarlyLogUtil.main()] ERROR DynamicConfig - 测试错误日志

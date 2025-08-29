@@ -1,0 +1,2 @@
+com.lingfengx.mid.dynamic.config.local.provider.LocalFileConfigSourceProvider
+com.lingfengx.mid.dynamic.config.local.provider.HttpRemoteFileConfigSourceProvider

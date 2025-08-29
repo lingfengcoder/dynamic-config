@@ -16,7 +16,6 @@ public @interface DynamicValConfig {
     /**
      * 配置文件（可使用路径）
      */
-
     String file() default "";
 
     /**
@@ -32,6 +31,14 @@ public @interface DynamicValConfig {
      * @return
      */
     String fileType() default "";
+
+    /**
+     * 配置源类型 (local/http/zookeeper等)
+     * 如果不指定，将根据file路径自动推断
+     * 
+     * @return
+     */
+    String sourceType() default "";
 
     /**
      * 监听器适配器

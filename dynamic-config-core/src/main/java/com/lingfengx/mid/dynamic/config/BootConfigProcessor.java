@@ -5,30 +5,27 @@ import com.lingfengx.mid.dynamic.config.ann.DynamicValConfig;
 import com.lingfengx.mid.dynamic.config.ann.EnableDynamicVal;
 import com.lingfengx.mid.dynamic.config.dto.BeanRef;
 import com.lingfengx.mid.dynamic.config.util.SpelUtil;
-import lombok.extern.slf4j.Slf4j;
+import com.lingfengx.mid.dynamic.config.util.EarlyLogUtil;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.env.EnvironmentPostProcessor;
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
 import org.springframework.core.annotation.AnnotatedElementUtils;
 import org.springframework.core.annotation.AnnotationUtils;
-import org.springframework.core.annotation.Order;
 import org.springframework.core.env.ConfigurableEnvironment;
 import org.springframework.core.env.MutablePropertySources;
 import org.springframework.core.env.PropertiesPropertySource;
 import org.springframework.core.env.PropertySource;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.type.filter.AnnotationTypeFilter;
 import org.springframework.util.StringUtils;
 
 import java.io.*;
 import java.lang.reflect.Field;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.*;
 
-@Slf4j
-@Order(Integer.MAX_VALUE)
+import static com.lingfengx.mid.dynamic.config.Banner.printLOGO;
+
 public class BootConfigProcessor implements EnvironmentPostProcessor {
     private static ConfigurableEnvironment configurableEnvironment;
     private static String[] scanPath = new String[0];
@@ -38,6 +35,9 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
     private static String[] packageName = new String[0];
     private static Set<String> beanClazzSet = new HashSet<>();
     private static final Map<String, Map<Properties, List<BeanRef>>> placeHolderRefMap = new HashMap<>();
+    
+    // 添加调试标志，可以通过系统属性控制
+    private static final boolean DEBUG_MODE = Boolean.getBoolean("dynamic.config.debug");
 
     @Override
     public void postProcessEnvironment(ConfigurableEnvironment environment, SpringApplication application) {
@@ -50,7 +50,10 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
             enable = loadDynamicValBeanRef(clazz) || enable;
         }
         if (enable || filePath.length > 0 || scanPath.length > 0) {
-            log.info("====BootConfigProcessor 加载外部配置文件开始==== {}", mainApplicationClass);
+            printLOGO();
+            // 使用早期日志工具输出
+            EarlyLogUtil.info("====BootConfigProcessor 加载外部配置文件开始==== " + mainApplicationClass);
+            EarlyLogUtil.logStartupInfo();
             tryLoadLocationConfig();
             clearAllRef();
         }
@@ -132,6 +135,10 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
         Set<DynamicValConfig> classesWithAnnotation = new HashSet<>();
         Set<BeanDefinition> candidates = provider.findCandidateComponents(packageName);
 
+        if (DEBUG_MODE) {
+            EarlyLogUtil.debug("Scanning package: " + packageName + " for DynamicValConfig annotations");
+        }
+
         for (BeanDefinition candidate : candidates) {
             try {
                 Class<?> clazz = Class.forName(candidate.getBeanClassName());
@@ -141,11 +148,15 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
                     annotation = AnnotatedElementUtils.getMergedAnnotation(clazz, DynamicValConfig.class);
                     //添加bean类
                     beanClazzSet.add(candidate.getBeanClassName());
+                    
+                    if (DEBUG_MODE) {
+                        EarlyLogUtil.debug("Found DynamicValConfig on class: " + candidate.getBeanClassName());
+                    }
                 }
                 classesWithAnnotation.add(annotation);
             } catch (ClassNotFoundException e) {
-                // 处理异常
-                log.error(e.getMessage(), e);
+                // 处理异常 - 使用早期日志工具
+                EarlyLogUtil.error("Class not found: " + candidate.getBeanClassName() + " - " + e.getMessage(), e);
             }
         }
         return classesWithAnnotation;
@@ -153,6 +164,14 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
 
     private static void tryLoadLocationConfig() {
         try {
+            // 在加载配置之前，先确保配置源已注册
+            ensureConfigSourcesRegistered();
+            
+            if (DEBUG_MODE) {
+                EarlyLogUtil.debug("Scanning packages: " + Arrays.toString(packageName));
+                EarlyLogUtil.debug("Scanning paths: " + Arrays.toString(scanPath));
+            }
+            
             Set<DynamicValConfig> configs = new HashSet<>();
             for (String p : packageName) {
                 if (StringUtils.hasLength(p)) {
@@ -164,96 +183,144 @@ public class BootConfigProcessor implements EnvironmentPostProcessor {
                     configs.addAll(scanClassesWithDynamicValConfig(path));
                 }
             }
+            
+            if (DEBUG_MODE) {
+                EarlyLogUtil.debug("Found " + configs.size() + " DynamicValConfig annotations");
+            }
+            
             Map<String, Properties> propertiesMap = new HashMap<>();
             Map<String, HashSet<DynamicValConfig>> configBeanMap = new HashMap<>();
-            //解析出来所有的配置文件
+            
+            // 解析出来所有的配置文件
             for (DynamicValConfig config : configs) {
                 String file = config.file();
                 String filename = config.file();
                 String fileType = config.fileType();
-                HashSet<String> filePathList = new HashSet<>(Arrays.asList(filePath));
-                //classpath自己
-                filePathList.add("");
-                for (String path : filePathList) {
-                    //完整路径读取
-                    if (path.startsWith(File.separator)) {
-                        File localFile = new File(path + "/" + file);
-                        if (localFile.exists() && localFile.isFile()) {
-                            String absolutePath = localFile.getAbsolutePath();
-                            Properties properties = propertiesMap.get(absolutePath);
-                            if (properties == null) {
-                                properties = convertProperties(localFile, filename, fileType);
-                                propertiesMap.put(absolutePath, properties);
-                            }
-                            //must inputStream!=null
-                            //inputStream已经存在了，直接添加ConfigBean
-                            configBeanMap.putIfAbsent(absolutePath, new HashSet<>());
-                            configBeanMap.get(absolutePath).add(config);
-                        }
-                    } else {
-                        //classpath读
-                        ClassPathResource classPathResource = new ClassPathResource(path + "/" + file);
-                        if (classPathResource.exists() && classPathResource.isFile()) {
-                            String absolutePath = classPathResource.getFile().getAbsolutePath();
-                            Properties properties = propertiesMap.get(absolutePath);
-                            if (properties == null) {
-                                properties = convertProperties(classPathResource.getFile(), filename, fileType);
-                                propertiesMap.put(absolutePath, properties);
-                            }
-                            //must inputStream!=null
-                            //inputStream已经存在了，直接添加ConfigBean
-                            configBeanMap.putIfAbsent(absolutePath, new HashSet<>());
-                            configBeanMap.get(absolutePath).add(config);
-                        }
-                    }
+                String sourceType = config.sourceType();
+                
+                // 构建配置位置
+                String configLocation = buildConfigLocation(file, sourceType);
+                
+                if (DEBUG_MODE) {
+                    EarlyLogUtil.debug("Processing config: " + file + " (type: " + fileType + ", source: " + sourceType + ")");
+                }
+                
+                try {
+                    // 使用ConfigSourceManager加载配置
+                    String configContent = ConfigSourceManager.loadConfig(configLocation);
+                    
+                    // 转换配置内容为Properties
+                    Properties properties = DynamicValBeanPostProcessor.convertProperties(configContent, filename, fileType);
+                    
+                    // 缓存Properties，避免重复加载
+                    String cacheKey = configLocation + ":" + fileType;
+                    propertiesMap.put(cacheKey, properties);
+                    
+                    // 添加配置Bean映射
+                    configBeanMap.putIfAbsent(cacheKey, new HashSet<>());
+                    configBeanMap.get(cacheKey).add(config);
+                    
+                    // 使用早期日志工具输出
+                    EarlyLogUtil.info("Successfully loaded config from: " + configLocation + " using source type: " + 
+                            (sourceType.isEmpty() ? "auto-detected" : sourceType));
+                    
+                } catch (Exception e) {
+                    EarlyLogUtil.error("Failed to load config from: " + configLocation + " with source type: " + 
+                            (sourceType.isEmpty() ? "auto-detected" : sourceType), e);
                 }
             }
-            //加载配置文件
-            {
-                configBeanMap.forEach((path, configHashSet) -> {
-                    final Properties properties = propertiesMap.get(path);
+            
+            // 加载配置文件到环境变量
+            configBeanMap.forEach((cacheKey, configHashSet) -> {
+                final Properties properties = propertiesMap.get(cacheKey);
+                if (properties != null) {
                     configHashSet.forEach(configBean -> {
                         try {
                             String file = configBean.file();
-                            //解析并更新
+                            // 解析并更新
                             DynamicValBeanPostProcessor.parseAndUpdate(properties, null);
-                            //刷新到环境变量中去
+                            // 刷新到环境变量中去
                             BootConfigProcessor.setVal(new PropertiesPropertySource(file, properties));
-                            //添加引用
+                            // 添加引用
                             properties.forEach((k, v) -> {
                                 addRef(k, v, properties);
                                 refreshOtherRef(k, v);
                             });
                         } catch (Exception e) {
-                            log.error("bootConfigProcessor-err:{}", e.getMessage(), e);
+                            EarlyLogUtil.error("bootConfigProcessor-err:" + e.getMessage(), e);
                         }
                     });
-                });
-            }
-            log.info("====BootConfigProcessor 加载外部配置文件完毕====");
+                }
+            });
+            
+            EarlyLogUtil.info("====BootConfigProcessor 加载外部配置文件完毕====");
         } catch (Exception e) {
-            log.error("bootConfigProcessor-err:{}", e.getMessage(), e);
+            EarlyLogUtil.error("bootConfigProcessor-err:" + e.getMessage(), e);
             throw new RuntimeException(e);
         }
     }
-
+    
     /**
-     * 转换file -> Properties
-     *
-     * @param fileAbsolutePath
-     * @param filename
-     * @param fileType
-     * @return
-     * @throws IOException
+     * 确保配置源已注册
+     * 在加载配置之前调用，确保所有配置源提供者和验证器都已注册
      */
-    public static Properties convertProperties(File fileAbsolutePath, String filename, String fileType) throws IOException {
-        //存放inputStream
-        InputStream inputStream = Files.newInputStream(fileAbsolutePath.toPath());
-        String data = convertToString(inputStream);
-        Properties properties = DynamicValBeanPostProcessor.convertProperties(data, filename, fileType);
-        inputStream.close();
-        return properties;
+    private static void ensureConfigSourcesRegistered() {
+        try {
+            // 检查是否已有配置源注册
+            if (!ConfigSourceRegistry.getRegisteredSourceTypes().isEmpty()) {
+                EarlyLogUtil.debug("Config sources already registered, skipping registration");
+                return;
+            }
+            
+            EarlyLogUtil.info("Ensuring config sources are registered before loading configurations");
+            
+            // 使用配置源扫描器自动发现和注册所有可用的配置源提供者
+            ConfigSourceScanner.scanAndRegisterConfigSources();
+            
+            EarlyLogUtil.info("Config sources registration completed");
+            
+        } catch (Exception e) {
+            EarlyLogUtil.warn("Failed to ensure config sources registration, will continue with existing sources");
+        }
     }
+    
+    /**
+     * 构建配置位置
+     * @param file 文件路径
+     * @param sourceType 配置源类型
+     * @return 配置位置
+     */
+    private static String buildConfigLocation(String file, String sourceType) {
+        if (!StringUtils.hasText(file)) {
+            throw new IllegalArgumentException("Configuration file path cannot be empty");
+        }
+        
+        // 如果指定了sourceType，使用指定的类型
+        if (StringUtils.hasText(sourceType)) {
+            ConfigSourceType configSourceType = ConfigSourceType.fromString(sourceType);
+            if (configSourceType != null) {
+                return configSourceType.getType() + "://" + file;
+            }
+        }
+        
+        // 根据文件路径自动推断配置源类型
+        ConfigSourceType inferredType = ConfigSourceType.inferFromUrl(file);
+        if (inferredType == ConfigSourceType.LOCAL) {
+            // 对于本地配置源，处理classpath前缀
+            if (file.startsWith("classpath:")) {
+                return "local://" + file.substring("classpath:".length());
+            } else if (file.startsWith("/") || file.contains(File.separator)) {
+                return "local://" + file;
+            } else {
+                return "local://" + file;
+            }
+        } else {
+            // 对于其他类型，直接返回原路径
+            return file;
+        }
+    }
+
+
 
 
     /**

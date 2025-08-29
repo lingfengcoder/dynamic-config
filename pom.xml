@@ -8,6 +8,7 @@
         <artifactId>spring-boot-dependencies</artifactId>
         <version>2.7.4</version>
     </parent>
+    <name>dynamic-config</name>
     <artifactId>dynamic-config</artifactId>
     <groupId>io.github.lingfengcoder</groupId>
     <version>${revision}</version>
@@ -16,18 +17,19 @@
     <url>https://github.com/lingfengcoder/dynamic-config</url>
     <description>基于springboot2.0的自定义动态配置注解</description>
     <properties>
-        <revision>1.0.5</revision>
+        <revision>1.0.6-BETA</revision>
         <maven.compiler.source>8</maven.compiler.source>
         <maven.compiler.target>8</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <middleware.version>1.0.8.1-RELEASE</middleware.version>
         <hutool.version>5.3.10</hutool.version>
-        <configmap.version>1.1.1</configmap.version>
         <flatten-maven-plugin.version>1.1.0</flatten-maven-plugin.version>
     </properties>
 
     <modules>
         <module>dynamic-config-core</module>
+        <module>dynamic-config-local-starter</module>
+        <module>dynamic-config-zookeeper-starter</module>
+        <module>dynamic-config-starter</module>
     </modules>
     <licenses>
         <license>
@@ -163,10 +165,20 @@
                     </execution>
                 </executions>
             </plugin>
+            <!--新账号的配置：将组件部署到OSSRH并将其发布到Central Repository-->
+            <plugin>
+                <groupId>org.sonatype.central</groupId>
+                <artifactId>central-publishing-maven-plugin</artifactId>
+                <version>0.4.0</version>
+                <extensions>true</extensions>
+                <configuration>
+                    <publishingServerId>ossrh</publishingServerId>
+                    <tokenAuth>true</tokenAuth>
+                </configuration>
+            </plugin>
         </plugins>
+
     </build>
-
-
 
     <distributionManagement>
         <snapshotRepository>
